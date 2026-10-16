@@ -1,3 +1,4 @@
+import math
 import time
 import pandas as pd
 import plotly.express as px
@@ -13,40 +14,35 @@ st.set_page_config(
 st.title("🏭 Production Flow Simulator: Batch vs. One-Piece Flow")
 st.markdown(
     """
-Aplikasi interaktif untuk memvisualisasikan dan membandingkan performa lini produksi antara **Batch Flow** dan **One-Piece Flow** berdasarkan stasiun kerja, *cycle time*, dan ukuran batch.
+Aplikasi interaktif untuk memvisualisasikan dan membandingkan performa lini produksi antara **Batch Flow** dan **One-Piece Flow** menggunakan animasi grafik interaktif.
 """
 )
 
 # --- SIDEBAR: KONFIGURASI PARAMETER ---
 st.sidebar.header("⚙️ Pengaturan Parameter")
 
-# 1. Parameter Order & Batch
 total_order = st.sidebar.number_input(
-    "Total Order (Pcs / Unit)", min_value=1, max_value=100, value=10, step=1
+    "Total Order (Pcs / Unit)", min_value=1, max_value=50, value=6, step=1
 )
 batch_size = st.sidebar.number_input(
     "Ukuran Batch (untuk Batch Flow)",
     min_value=1,
     max_value=total_order,
-    value=5,
+    value=3,
     step=1,
 )
 sim_speed = st.sidebar.slider(
-    "Kecepatan Animasi Simulasi (detik/step)",
-    min_value=0.05,
+    "Kecepatan Animasi (detik)",
+    min_value=0.1,
     max_value=1.0,
-    value=0.2,
-    step=0.05,
+    value=0.3,
+    step=0.1,
 )
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🛠️ Stasiun Kerja & Cycle Time")
-st.sidebar.markdown(
-    "Atur nama proses dan waktu siklus (*cycle time* dalam detik) per unit untuk setiap stasiun."
-)
 
-# 2. Tabel Dinamis untuk Stasiun Kerja
-default_stations = pd.f_data = pd.DataFrame(
+default_stations = pd.DataFrame(
     {
         "Nama Proses": ["1. Cutting", "2. Sewing", "3. Assembly", "4. Packing"],
         "Cycle Time (detik)": [2, 3, 2, 1],
@@ -57,7 +53,6 @@ stations_df = st.data_editor(
     default_stations, num_rows="dynamic", key="station_editor"
 )
 
-# Validasi input stasiun
 if stations_df.empty or any(stations_df["Cycle Time (detik)"] <= 0):
     st.error(
         "Harap masukkan minimal 1 stasiun kerja dengan Cycle Time > 0 detik."
@@ -76,120 +71,128 @@ with col_btn1:
     )
 
 
-# --- FUNGSI SIMULASI LOGIC ---
-def calculate_batch_flow_schedule(
-    total_qty, b_size, c_times
-):  # pylint: disable=unused-argument
-    """Menghitung metrik & timeline untuk Batch Flow"""
-    # Jumlah batch
-    import math
-
+# --- FUNGSI PERHITUNGAN LOGIC ---
+def calculate_metrics(total_qty, b_size, c_times):
     num_batches = math.ceil(total_qty / b_size)
-
-    # Sederhana: estimasi lead time total dan WIP
-    # Batch flow menumpuk WIP di tengah
     per_station_time = sum(c_times)
-    total_lead_time = (
-        per_station_time * b_size * (num_batches)
-    )  # Estimasi kasar logika batch
-    avg_wip = total_qty * (num_stations / 2)  # WIP cenderung tinggi
-    return total_lead_time, avg_wip, num_batches
+    lt_batch = per_station_time * b_size * num_batches
+    wip_batch = total_qty * (num_stations / 2)
 
-
-def calculate_opf_schedule(total_qty, c_times):
-    """Menghitung metrik & timeline untuk One-Piece Flow"""
-    # Unit pertama selesai setelah lewat semua stasiun pertama kali
-    first_piece_time = sum(c_times)
-    # Unit berikutnya selesai setiap max(cycle_time)
+    first_pc_opf = sum(c_times)
     max_ct = max(c_times)
-    total_lead_time = first_piece_time + (total_qty - 1) * max_ct
-    avg_wip = num_stations  # WIP sangat rendah dan konstan
-    return total_lead_time, avg_wip, first_piece_time
+    lt_opf = first_pc_opf + (total_qty - 1) * max_ct
+    wip_opf = num_stations
+
+    return lt_batch, wip_batch, lt_opf, wip_opf, first_pc_opf
 
 
-# --- EKsekusi JIKA TOMBOL DIKLIK / STATE AKTIF ---
+# --- EKSEKUSI JIKA TOMBOL DIKLIK ---
 if run_sim:
     st.markdown("---")
-    st.subheader("🔴 vs 🟢 Live Simulation Comparison")
+    st.subheader("📊 Live Animated Visual Simulation")
+    st.markdown(
+        "Grafik di bawah ini memvisualisasikan pergerakan unit produk dari **Stasiun ke Stasiun** seiring berjalannya waktu simulasi."
+    )
 
-    # Layout Side-by-Side untuk Visualisasi Jalur
-    col_batch_view, col_opf_view = st.columns(2)
+    # Placeholder untuk grafik animasi
+    chart_placeholder = st.empty()
 
-    with col_batch_view:
-        st.markdown("### 📦 **Batch Flow (Ukuran Batch: {})**".format(batch_size))
-        batch_placeholder = st.empty()
-
-    with col_opf_view:
-        st.markdown("### ⚡ **One-Piece Flow (Single Piece)**")
-        opf_placeholder = st.empty()
-
-    # Simulasi Langkah Step-by-Step (Visual Emoji Animation)
-    # Kita simulasikan pergerakan unit/batch secara visual sederhana di Streamlit
-    import math
-
+    # Mempersiapkan data frame untuk animasi Plotly Scatter
+    # Kita buat simulasi frame pergerakan waktu
     num_batches = math.ceil(total_order / batch_size)
+    max_steps = max(10, num_stations + total_order + 3)
 
-    # --- Simulasi Batch Flow Visual Loop ---
-    for step in range(
-        1, max(6, num_stations + num_batches + 2)
-    ):  # Batasi iterasi animasi agar smooth
-        b_text = ""
-        for s_idx, s_name in enumerate(stations):
-            # Simulasi posisi barang di batch flow
-            if s_idx < step:
-                b_text += f"- **{s_name}**: 📦 Sedang proses 1 Batch penuh\n"
-            else:
-                b_text += f"- **{s_name}**: ⏳ Menunggu antrean batch\n"
+    anim_data = []
 
-        batch_placeholder.markdown(b_text)
+    # Generasi data posisi unit untuk Batch Flow & One-Piece Flow per detik/step waktu
+    for t in range(max_steps):
+        # 1. Batch Flow Simulation Data
+        for u in range(1, total_order + 1):
+            batch_id = (u - 1) // batch_size
+            # Batch bergerak perlahan stasiun demi stasiun
+            stasiun_pos = min(
+                num_stations - 1, max(0, t - (batch_id * sum(cycle_times) // 2))
+            )
+            anim_data.append(
+                {
+                    "Waktu (detik)": t,
+                    "Unit": f"Unit {u}",
+                    "Stasiun": stations[stasiun_pos],
+                    "Metode": "Batch Flow",
+                    "Posisi_Index": stasiun_pos,
+                }
+            )
 
-        # --- Simulasi One-Piece Flow Visual Loop ---
-        o_text = ""
-        for s_idx, s_name in enumerate(stations):
-            if s_idx < step:
-                o_text += (
-                    f"- **{s_name}**: 🟢 Unit 1, 2, 3 mengalir kontinu\n"
-                )
-            else:
-                o_text += f"- **{s_name}**: ⏳ Standby\n"
+        # 2. One-Piece Flow Simulation Data
+        for u in range(1, total_order + 1):
+            # One-piece mengalir cepat satu per satu
+            stasiun_pos = min(num_stations - 1, max(0, t - (u - 1)))
+            anim_data.append(
+                {
+                    "Waktu (detik)": t,
+                    "Unit": f"Unit {u}",
+                    "Stasiun": stations[stasiun_pos],
+                    "Metode": "One-Piece Flow",
+                    "Posisi_Index": stasiun_pos,
+                }
+            )
 
-        opf_placeholder.markdown(o_text)
+    df_anim = pd.DataFrame(anim_data)
+
+    # Jalankan animasi frame demi frame di Streamlit menggunakan Plotly
+    for t_step in range(max_steps):
+        df_filtered = df_anim[df_anim["Waktu (detik)"] == t_step]
+
+        fig = px.scatter(
+            df_filtered,
+            x="Stasiun",
+            y="Unit",
+            color="Metode",
+            symbol="Metode",
+            title=f"Simulasi Produksi pada Detik ke-{t_step}",
+            range_x=[-0.5, num_stations - 0.5],
+            range_y=[-0.5, total_order + 0.5],
+            size_max=15,
+            color_discrete_map={
+                "Batch Flow": "#ff7f0e",
+                "One-Piece Flow": "#2ca02c",
+            },
+        )
+        fig.update_traces(marker=dict(size=14))
+        fig.update_layout(transition_duration=100)
+
+        chart_placeholder.plotly_chart(fig, use_container_width=True)
         time.sleep(sim_speed)
 
-    # --- HITUNG HASIL AKHIR ---
-    lt_batch, wip_batch, _ = calculate_batch_flow_schedule(
+    # --- HITUNG HASIL AKHIR & METRIK ---
+    lt_batch, wip_batch, lt_opf, wip_opf, first_pc_opf = calculate_metrics(
         total_order, batch_size, cycle_times
-    )
-    lt_opf, wip_opf, first_pc_opf = calculate_opf_schedule(
-        total_order, cycle_times
     )
 
     st.markdown("---")
-    st.subheader("📊 Hasil Perbandingan & Metrik Akhir")
+    st.subheader("📈 Hasil Perbandingan & Metrik Akhir")
 
-    # Tampilkan Metrik Side-by-Side
     m_col1, m_col2 = st.columns(2)
 
     with m_col1:
         st.markdown("#### 📦 Metode: Batch Flow")
         st.metric(
-            label="Total Lead Time (Waktu Selesai Semua)",
-            value=f"{lt_batch} detik",
+            label="Total Lead Time", value=f"{lt_batch} detik / unit selesai"
         )
         st.metric(
             label="Rata-rata WIP (Work in Process)",
             value=f"{wip_batch:.1f} unit",
-            delta="Tinggi (Banyak Tertahan)",
+            delta="Tinggi (Menumpuk)",
             delta_color="inverse",
         )
         st.info(
-            "⚠️ **Karakteristik:** Terjadi penumpukan barang di depan mesin (*bottleneck*), barang pertama baru selesai di waktu yang lama."
+            "⚠️ Barang tertahan lama dalam batch sebelum bisa diproses ke stasiun berikutnya."
         )
 
     with m_col2:
         st.markdown("#### ⚡ Metode: One-Piece Flow")
         st.metric(
-            label="Total Lead Time (Waktu Selesai Semua)",
+            label="Total Lead Time",
             value=f"{lt_opf} detik",
             delta=f"-{lt_batch - lt_opf} detik lebih cepat",
         )
@@ -199,44 +202,10 @@ if run_sim:
             delta="Sangat Rendah (Lean)",
         )
         st.success(
-            f"✨ **Karakteristik:** Unit pertama selesai dalam **{first_pc_opf} detik** saja! Aliran mulus tanpa antrean menumpuk."
+            f"✨ Unit pertama selesai hanya dalam **{first_pc_opf} detik**! Aliran mulus tanpa antrean."
         )
-
-    # --- GRAFIK PERBANDINGAN PLOTLY ---
-    st.markdown("---")
-    st.subheader("📈 Grafik Perbandingan Metrik Utama")
-
-    comparison_data = pd.DataFrame(
-        {
-            "Metode": ["Batch Flow", "One-Piece Flow"],
-            "Total Lead Time (detik)": [lt_batch, lt_opf],
-            "Rata-rata WIP (Unit)": [wip_batch, wip_opf],
-        }
-    )
-
-    fig_melted = comparison_data.melt(
-        id_vars="Metode", var_name="Metrik", value_name="Nilai"
-    )
-
-    fig = px.bar(
-        fig_melted,
-        x="Metrik",
-        y="Nilai",
-        color="Metode",
-        barmode="group",
-        text="Nilai",
-        title="Perbandingan Performa: Batch Flow vs One-Piece Flow",
-        color_discrete_map={
-            "Batch Flow": "#ff7f0e",
-            "One-Piece Flow": "#2ca02c",
-        },
-    )
-    fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
-    fig.update_layout(uniformtext_minsize=8, uniformtext_mode="hide")
-
-    st.plotly_chart(fig, use_container_width=True)
 
 else:
     st.info(
-        "👆 Silakan atur parameter stasiun kerja di sidebar, lalu klik tombol **Jalankan Simulasi** di atas untuk melihat visualisasinya."
+        "👆 Atur parameter di sidebar, lalu klik tombol **Jalankan Simulasi** untuk melihat animasi pergerakan produk secara visual."
     )
