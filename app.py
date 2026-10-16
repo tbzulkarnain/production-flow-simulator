@@ -180,7 +180,7 @@ if run_sim:
             label="Rata-rata WIP (Work in Process)",
             value=f"{wip_batch:.1f} unit",
             delta="Tinggi (Banyak Tertahan)",
-            delta_value="inverse",
+            delta_color="inverse",
         )
         st.info(
             "⚠️ **Karakteristik:** Terjadi penumpukan barang di depan mesin (*bottleneck*), barang pertama baru selesai di waktu yang lama."
